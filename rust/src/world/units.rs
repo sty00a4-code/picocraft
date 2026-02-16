@@ -5,7 +5,7 @@ pub const TILE_SIZE: usize = 32;
 /// static chunk size
 pub const CHUNK_SIZE: usize = 16;
 /// static chunk size
-pub const CHUNK_HEIGHT: usize = 3;
+pub const CHUNK_HEIGHT: usize = 8;
 /// static chunk volume for flat lists
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT;
 

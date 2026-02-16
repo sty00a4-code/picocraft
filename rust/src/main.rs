@@ -31,7 +31,7 @@ impl Default for Game {
             player: Player::default(),
             world: BlockMap::new(BlockSet::normal(), OverWorldGenerator::default(), 42),
             camera: Camera2D {
-                zoom: 1.0,
+                zoom: 0.5,
                 ..Default::default()
             },
             selected: 1,
@@ -71,7 +71,7 @@ impl Game {
         }
     }
     pub fn edit_move(&mut self, dt: f32) {
-        const SPEED: f32 = 200.0;
+        const SPEED: f32 = 300.0;
         let mut acc = Vector2::zero();
         if self.rl.is_key_down(KeyboardKey::KEY_A) {
             acc.x -= 1.0;

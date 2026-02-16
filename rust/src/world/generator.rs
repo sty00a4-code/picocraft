@@ -119,8 +119,6 @@ impl TerrainGenerator for OverWorldGenerator {
         chunk_data: &Self::ChunkData,
     ) -> Block {
         // generator.rs -> gen_block(...)
-        let surface_z = 1i32;
-        let surface_top_z = 2i32;
         let height = self
             .block_height
             .get([x as f64 * 0.01, y as f64 * 0.01], perlin);
@@ -128,7 +126,27 @@ impl TerrainGenerator for OverWorldGenerator {
 
         match chunk_data {
             OverWorldBiom::Plains => {
-                if z == surface_top_z {
+                if z == 4 {
+                    if height > 0.6 {
+                        return Block::Rock;
+                    }
+                    return Block::default();
+                }
+                if z == 3 {
+                    if height > 0.4 {
+                        return Block::Rock;
+                    } else if height > 0.2 {
+                        if plants > 0.2 {
+                            return Block::Tree;
+                        } else if plants > 0.15 {
+                            return Block::BerryBush;
+                        } else if plants > 0.1 {
+                            return Block::Bush;
+                        }
+                    }
+                    return Block::default();
+                }
+                if z == 2 {
                     if height > 0.2 {
                         return Block::Grass;
                     } else if height > 0.05 {
@@ -143,7 +161,7 @@ impl TerrainGenerator for OverWorldGenerator {
                     return Block::default();
                 }
                 // surface layer handling
-                if z == surface_z {
+                if z == 1 {
                     if height > 0.05 {
                         return Block::Grass;
                     } else if height > 0.0 {
@@ -154,7 +172,7 @@ impl TerrainGenerator for OverWorldGenerator {
                 }
 
                 // lower layers
-                if z < surface_z {
+                if z < 1 {
                     if height > 0.05 {
                         return Block::Grass;
                     }
