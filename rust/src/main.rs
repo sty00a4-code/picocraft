@@ -9,7 +9,7 @@ use world::{
     units::{TILE_SIZE, WorldBlockPos},
 };
 
-use crate::world::generator::OverWorldGenerator;
+use crate::world::{generator::OverWorldGenerator, map::Block};
 
 pub struct Game {
     rl: RaylibHandle,
@@ -50,25 +50,26 @@ impl Game {
             y: my + 1,
             z: 1,
         };
-        // self.edit_place(mwpos);
+        self.edit_place(mwpos);
         self.edit_move(dt);
     }
-    // pub fn edit_place(&mut self, mwpos: WorldBlockPos) {
-    //     let md = self.rl.get_mouse_wheel_move();
-    //     if md > 0.0 {
-    //         self.selected = self.selected.wrapping_add(1).max(1);
-    //     } else if md < 0.0 {
-    //         self.selected = self.selected.wrapping_sub(1).max(1);
-    //     }
-    //     if self.rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
-    //         self.world.set_block(mwpos, self.selected);
-    //     } else if self
-    //         .rl
-    //         .is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT)
-    //     {
-    //         self.world.set_block(mwpos, 0);
-    //     }
-    // }
+    pub fn edit_place(&mut self, mwpos: WorldBlockPos) {
+        let md = self.rl.get_mouse_wheel_move();
+        if md > 0.0 {
+            self.selected = self.selected.wrapping_add(1).max(1);
+        } else if md < 0.0 {
+            self.selected = self.selected.wrapping_sub(1).max(1);
+        }
+        if self.rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
+            self.world
+                .set_block(mwpos, self.selected.try_into().unwrap_or_default());
+        } else if self
+            .rl
+            .is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT)
+        {
+            self.world.set_block(mwpos, Block::default());
+        }
+    }
     pub fn edit_move(&mut self, dt: f32) {
         const SPEED: f32 = 200.0;
         let mut acc = Vector2::zero();

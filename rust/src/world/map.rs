@@ -96,6 +96,27 @@ impl From<Block> for u8 {
         }
     }
 }
+impl TryInto<Block> for u8 {
+    type Error = ();
+    fn try_into(self) -> Result<Block, Self::Error> {
+        match self {
+            0 => Ok(Block::Air),
+            1 => Ok(Block::Grass),
+            2 => Ok(Block::Rock),
+            3 => Ok(Block::Sand),
+            4 => Ok(Block::Tree),
+            5 => Ok(Block::Bush),
+            6 => Ok(Block::BerryBush),
+            7 => Ok(Block::Flower),
+            8 => Ok(Block::Mushroom),
+            9 => Ok(Block::Stone),
+            10 => Ok(Block::Iron),
+            11 => Ok(Block::Diamond),
+            12 => Ok(Block::Ruby),
+            _ => Err(()),
+        }
+    }
+}
 impl BlockSet {
     pub fn normal() -> Self {
         let at47_arc = Arc::new(at47) as AutoBlockFn;
