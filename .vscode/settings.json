@@ -1,0 +1,16 @@
+{
+    "Lua.diagnostics.globals": [
+        "impl",
+        "class",
+        "love",
+        "box2",
+        "box3",
+        "addLoad",
+        "addUpdate",
+        "addDraw",
+        "rawtype",
+        "vec2",
+        "vec3"
+    ],
+    "Lua.runtime.version": "LuaJIT"
+}
