@@ -129,24 +129,23 @@ impl BlockSet {
 
 impl BlockMap {
     pub fn new(blockset: BlockSet, generator: OverWorldGenerator, seed: u32) -> Self {
-        // ... spawn threaded generators communicating with the `BlockMap` via channels
+        // threaded chunk generation channels
         let (request_tx, request_rx): (Sender<ChunkRequest>, Receiver<ChunkRequest>) = bounded(64);
         let (response_tx, response_rx): (Sender<ChunkResponse>, Receiver<ChunkResponse>) =
             bounded(64);
 
+        // shared generator
         let generator = Arc::new(generator);
-        let arc_seed = Arc::new(seed);
 
+        // spawn generator threads with channels
         let mut generators = Vec::with_capacity(8);
-        // ... instantiate threads and connect channels
         for _ in 0..8 {
             let request_rx = request_rx.clone();
             let response_tx = response_tx.clone();
             let generator = generator.clone();
-            let seed = arc_seed.clone();
 
             let handle = thread::spawn(move || {
-                let perlin = Fbm::<Perlin>::new(*seed);
+                let perlin = Fbm::<Perlin>::new(seed);
                 while let Ok(ChunkRequest(pos)) = request_rx.recv() {
                     let generator = generator.clone();
                     let chunk = generator.gen_chunk(pos, &perlin);
@@ -156,7 +155,7 @@ impl BlockMap {
             generators.push(handle);
         }
 
-        // Drop extra receivers so channel closes properly when main drops its sender
+        // drop unused channel references
         drop((request_rx, response_tx));
 
         Self {
@@ -169,8 +168,6 @@ impl BlockMap {
             last_view: (ChunkPos::default(), ChunkPos::default()),
         }
     }
-
-    // ... (keep existing getters/setters unchanged until update)
 
     /// returns `Chunk` at `ChunkPos`
     #[inline(always)]
@@ -273,11 +270,15 @@ impl BlockMap {
 
     /// updates every chunk and generates new ones within `view_space`
     pub fn update(&mut self, _dt: f32, camera: &Camera2D) {
+        // get view space for updating chunks
         let (start, end) = Self::view_space(camera.target, camera.zoom);
+        // receive new chunks from channel
         while let Ok(response) = self.response_rx.try_recv() {
             self.set_chunk(response.pos, response.chunk);
         }
+        // only update neighbors if view space changed
         let update_chunk_neighbors = start != self.last_view.0 || end != self.last_view.1;
+        // find new chunks to load and update chunk neighbors if necessary
         for y in start.y..=end.y {
             for x in start.x..=end.x {
                 let pos = ChunkPos { x, y };
@@ -299,14 +300,14 @@ impl BlockMap {
     /// update the neighbors of each block in the chunk at `ChunkPos`
     #[inline(always)]
     pub fn update_chunk_neighbors(&mut self, cpos: ChunkPos) {
-        // First, get a *shared* reference to the world for neighbor reads.
-        // We only need &self during the parallel section.
+        // block map for parrallel computing
         let world_ref: &BlockMap = self;
 
-        // Precompute neighbors into a local Vec (not captured mutably in closure)
+        // compute the neighbors in parrallel
         let new_neighbors: Vec<BlockNeighbors> = (0..CHUNK_VOLUME)
             .into_par_iter()
             .map(|idx| {
+                // get chunk block position
                 let z = (idx / (CHUNK_SIZE * CHUNK_SIZE)) as i32;
                 let y = ((idx / CHUNK_SIZE) % CHUNK_SIZE) as i32;
                 let x = (idx % CHUNK_SIZE) as i32;
@@ -319,6 +320,7 @@ impl BlockMap {
                 let wpos = ctpos.to_world(cpos);
 
                 if let Some(gid) = world_ref.get_block(wpos) {
+                    // floor neighbors
                     let mut floor_neighbors: Neighbors = 0;
                     for ny in -1..=1 {
                         for nx in -1..=1 {
@@ -339,6 +341,7 @@ impl BlockMap {
                         }
                     }
 
+                    // wall neighbors with top always present
                     let mut wall_neighbors: Neighbors = 0b111;
                     for dz in 0..=1 {
                         for dx in -1..=1 {
@@ -366,51 +369,11 @@ impl BlockMap {
             })
             .collect();
 
-        // Now we’re done with &self in parallel.
-        // Take the mutable borrow and copy the results into the chunk.
         if let Some(chunk) = self.get_chunk_mut(cpos) {
-            // new_neighbors.len() == CHUNK_VOLUME
             chunk.neighbors.copy_from_slice(&new_neighbors);
         }
     }
 
-    /// Thread-safe READ-ONLY neighbor calculation
-    #[inline(always)]
-    fn calc_neighbors_readonly(&self, wpos: WorldBlockPos, gid: Block) -> BlockNeighbors {
-        let mut floor_neighbors: Neighbors = 0;
-        for ny in -1..=1 {
-            for nx in -1..=1 {
-                if nx == 0 && ny == 0 {
-                    continue;
-                }
-                let npos = WorldBlockPos {
-                    x: wpos.x + nx,
-                    y: wpos.y + ny,
-                    z: wpos.z,
-                };
-                floor_neighbors =
-                    (floor_neighbors << 1) | (self.get_block(npos).unwrap_or(0) == gid) as u8;
-            }
-        }
-
-        let mut wall_neighbors: Neighbors = 0b111;
-        for dz in 0..=1 {
-            for dx in -1..=1 {
-                if dx == 0 && dz == 0 {
-                    continue;
-                }
-                let npos = WorldBlockPos {
-                    x: wpos.x + dx,
-                    y: wpos.y,
-                    z: wpos.z - dz,
-                };
-                wall_neighbors =
-                    (wall_neighbors << 1) | (self.get_block(npos).unwrap_or(0) == gid) as u8;
-            }
-        }
-        wall_neighbors = !(!wall_neighbors | 0b111);
-        (floor_neighbors, wall_neighbors)
-    }
     /// draw the world to the screen in `view_space`
     pub fn draw(&self, d: &mut RaylibDrawHandle, atlas: &Texture2D, camera: &Camera2D) {
         let mut draw: RaylibMode2D<'_, RaylibDrawHandle<'_>> = d.begin_mode2D(*camera);
@@ -540,13 +503,6 @@ impl BlockMap {
         };
         draw.draw_texture_pro(atlas, src, dst, Vector2::zero(), 0.0, Color::WHITE);
     }
-}
-#[inline]
-fn idx_to_pos(idx: usize) -> (u32, u32, u32) {
-    let z = (idx / (CHUNK_SIZE * CHUNK_SIZE)) as u32;
-    let y = ((idx / CHUNK_SIZE) % CHUNK_SIZE) as u32;
-    let x = (idx % CHUNK_SIZE) as u32;
-    (x, y, z)
 }
 
 impl Debug for BlockKind {
