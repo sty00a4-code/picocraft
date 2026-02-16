@@ -4,16 +4,12 @@ pub mod world;
 
 use player::Player;
 use raylib::prelude::*;
-use std::sync::Arc;
 use world::{
-    map::{BlockData, BlockKind, BlockMap, BlockSet},
+    map::{BlockMap, BlockSet},
     units::{TILE_SIZE, WorldBlockPos},
 };
 
-use crate::world::{
-    generator::OverWorldGenerator,
-    map::{AutoBlockFn, at47},
-};
+use crate::world::generator::OverWorldGenerator;
 
 pub struct Game {
     rl: RaylibHandle,
@@ -28,82 +24,14 @@ impl Default for Game {
     fn default() -> Self {
         let (mut rl, thread) = raylib::init().size(640, 480).title("PicoCraft").build();
         let atlas = rl.load_texture(&thread, "assets/tileset.png").unwrap();
-        let at47_arc = Arc::new(at47) as AutoBlockFn;
         Self {
             rl,
             thread,
             atlas,
             player: Player::default(),
-            world: BlockMap::new(
-                BlockSet {
-                    data: vec![
-                        // GRASS
-                        BlockData {
-                            atlas_pos: (0, 0).into(),
-                            kind: BlockKind::Block(at47_arc.clone()),
-                        },
-                        // STONE
-                        BlockData {
-                            atlas_pos: (0, 12).into(),
-                            kind: BlockKind::Block(at47_arc.clone()),
-                        },
-                        // SAND
-                        BlockData {
-                            atlas_pos: (0, 24).into(),
-                            kind: BlockKind::Block(at47_arc.clone()),
-                        },
-                        // TREE
-                        BlockData {
-                            atlas_pos: (8, 2).into(),
-                            kind: BlockKind::Prop,
-                        },
-                        // BUSH
-                        BlockData {
-                            atlas_pos: (7, 3).into(),
-                            kind: BlockKind::Prop,
-                        },
-                        // BERRY BUSH
-                        BlockData {
-                            atlas_pos: (8, 3).into(),
-                            kind: BlockKind::Prop,
-                        },
-                        // FLOWER
-                        BlockData {
-                            atlas_pos: (7, 4).into(),
-                            kind: BlockKind::Prop,
-                        },
-                        // MUSHROOM
-                        BlockData {
-                            atlas_pos: (8, 4).into(),
-                            kind: BlockKind::Prop,
-                        },
-                        // STONE
-                        BlockData {
-                            atlas_pos: (8, 14).into(),
-                            kind: BlockKind::Prop,
-                        },
-                        // IRON
-                        BlockData {
-                            atlas_pos: (7, 15).into(),
-                            kind: BlockKind::Prop,
-                        },
-                        // DIAMOND
-                        BlockData {
-                            atlas_pos: (8, 15).into(),
-                            kind: BlockKind::Prop,
-                        },
-                        // RUBY
-                        BlockData {
-                            atlas_pos: (7, 16).into(),
-                            kind: BlockKind::Prop,
-                        },
-                    ],
-                },
-                OverWorldGenerator::default(),
-                42,
-            ),
+            world: BlockMap::new(BlockSet::normal(), OverWorldGenerator::default(), 42),
             camera: Camera2D {
-                zoom: 0.25,
+                zoom: 1.0,
                 ..Default::default()
             },
             selected: 1,
@@ -122,25 +50,25 @@ impl Game {
             y: my + 1,
             z: 1,
         };
-        self.edit_place(mwpos);
+        // self.edit_place(mwpos);
         self.edit_move(dt);
     }
-    pub fn edit_place(&mut self, mwpos: WorldBlockPos) {
-        let md = self.rl.get_mouse_wheel_move();
-        if md > 0.0 {
-            self.selected = self.selected.wrapping_add(1).max(1);
-        } else if md < 0.0 {
-            self.selected = self.selected.wrapping_sub(1).max(1);
-        }
-        if self.rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
-            self.world.set_block(mwpos, self.selected);
-        } else if self
-            .rl
-            .is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT)
-        {
-            self.world.set_block(mwpos, 0);
-        }
-    }
+    // pub fn edit_place(&mut self, mwpos: WorldBlockPos) {
+    //     let md = self.rl.get_mouse_wheel_move();
+    //     if md > 0.0 {
+    //         self.selected = self.selected.wrapping_add(1).max(1);
+    //     } else if md < 0.0 {
+    //         self.selected = self.selected.wrapping_sub(1).max(1);
+    //     }
+    //     if self.rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
+    //         self.world.set_block(mwpos, self.selected);
+    //     } else if self
+    //         .rl
+    //         .is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT)
+    //     {
+    //         self.world.set_block(mwpos, 0);
+    //     }
+    // }
     pub fn edit_move(&mut self, dt: f32) {
         const SPEED: f32 = 200.0;
         let mut acc = Vector2::zero();

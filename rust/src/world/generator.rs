@@ -10,7 +10,7 @@ pub trait TerrainGenerator {
     fn gen_chunk(&self, cpos: ChunkPos, perlin: &Fbm<Perlin>) -> Chunk {
         let mut chunk = Chunk::new_empty();
         let chunk_data = self.get_chunk_data(cpos, perlin);
-        for z in 0..CHUNK_SIZE {
+        for z in 0..CHUNK_HEIGHT {
             for y in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
                     let ctpos = ChunkBlockPos { x, y, z };
@@ -80,6 +80,7 @@ impl<const SIZE: usize> GetNoise<3> for NoiseLayers<SIZE, 3> {
 #[derive(Debug)]
 pub struct OverWorldGenerator {
     pub block_height: NoiseLayers<1, 2>,
+    pub plants: NoiseConfig<2>,
 }
 impl Default for OverWorldGenerator {
     fn default() -> Self {
@@ -87,11 +88,17 @@ impl Default for OverWorldGenerator {
             block_height: NoiseLayers {
                 layers: [NoiseConfig {
                     freq: 0.01,
-                    amp: 1.0,
-                    gain: 1.0,
-                    offset: [100.0, 200.0],
+                    amp: 1.,
+                    gain: 1.,
+                    offset: [100., 200.],
                 }],
-                scales: [1.0],
+                scales: [1.],
+            },
+            plants: NoiseConfig {
+                freq: 1.0,
+                amp: 1.0,
+                gain: 1.,
+                offset: [0., 0.],
             },
         }
     }
@@ -109,16 +116,55 @@ impl TerrainGenerator for OverWorldGenerator {
         &self,
         WorldBlockPos { x, y, z }: WorldBlockPos,
         perlin: &Fbm<Perlin>,
-        _chunk_data: &Self::ChunkData,
+        chunk_data: &Self::ChunkData,
     ) -> Block {
+        // generator.rs -> gen_block(...)
+        let surface_z = 1i32;
+        let surface_top_z = 2i32;
         let height = self
             .block_height
             .get([x as f64 * 0.01, y as f64 * 0.01], perlin);
-        if (height > 0.2 && z == 2) || (height > 0.05 && z == 1) {
-            return 1;
-        } else if height > 0.0 && z == 1 {
-            return 3;
+        let plants = self.plants.get([x as f64, y as f64], perlin);
+
+        match chunk_data {
+            OverWorldBiom::Plains => {
+                if z == surface_top_z {
+                    if height > 0.2 {
+                        return Block::Grass;
+                    } else if height > 0.05 {
+                        if plants > 0.2 {
+                            return Block::Tree;
+                        } else if plants > 0.15 {
+                            return Block::BerryBush;
+                        } else if plants > 0.1 {
+                            return Block::Bush;
+                        }
+                    }
+                    return Block::default();
+                }
+                // surface layer handling
+                if z == surface_z {
+                    if height > 0.05 {
+                        return Block::Grass;
+                    } else if height > 0.0 {
+                        return Block::Sand;
+                    } else {
+                        return Block::default();
+                    }
+                }
+
+                // lower layers
+                if z < surface_z {
+                    if height > 0.05 {
+                        return Block::Grass;
+                    }
+                    if height > 0.0 {
+                        return Block::Sand;
+                    }
+                }
+
+                Block::default()
+            }
         }
-        0
     }
 }

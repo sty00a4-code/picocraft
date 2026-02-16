@@ -23,7 +23,7 @@ pub struct ChunkResponse {
 }
 
 /// holds static `BlockData` for every `Block`
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct BlockSet {
     pub data: Vec<BlockData>,
 }
@@ -59,7 +59,112 @@ pub struct Chunk {
     neighbors: [BlockNeighbors; CHUNK_VOLUME],
 }
 /// represents a block type
-pub type Block = u8;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum Block {
+    #[default]
+    Air,
+    Grass,
+    Rock,
+    Sand,
+    Tree,
+    Bush,
+    BerryBush,
+    Flower,
+    Mushroom,
+    Stone,
+    Iron,
+    Diamond,
+    Ruby,
+}
+impl From<Block> for u8 {
+    fn from(val: Block) -> Self {
+        match val {
+            Block::Air => 0,
+            Block::Grass => 1,
+            Block::Rock => 2,
+            Block::Sand => 3,
+            Block::Tree => 4,
+            Block::Bush => 5,
+            Block::BerryBush => 6,
+            Block::Flower => 7,
+            Block::Mushroom => 8,
+            Block::Stone => 9,
+            Block::Iron => 10,
+            Block::Diamond => 11,
+            Block::Ruby => 12,
+        }
+    }
+}
+impl BlockSet {
+    pub fn normal() -> Self {
+        let at47_arc = Arc::new(at47) as AutoBlockFn;
+        BlockSet {
+            data: vec![
+                // GRASS
+                BlockData {
+                    atlas_pos: (0, 0).into(),
+                    kind: BlockKind::Block(at47_arc.clone()),
+                },
+                // ROCK
+                BlockData {
+                    atlas_pos: (0, 12).into(),
+                    kind: BlockKind::Block(at47_arc.clone()),
+                },
+                // SAND
+                BlockData {
+                    atlas_pos: (0, 24).into(),
+                    kind: BlockKind::Block(at47_arc.clone()),
+                },
+                // TREE
+                BlockData {
+                    atlas_pos: (8, 2).into(),
+                    kind: BlockKind::Prop,
+                },
+                // BUSH
+                BlockData {
+                    atlas_pos: (7, 3).into(),
+                    kind: BlockKind::Prop,
+                },
+                // BERRY BUSH
+                BlockData {
+                    atlas_pos: (8, 3).into(),
+                    kind: BlockKind::Prop,
+                },
+                // FLOWER
+                BlockData {
+                    atlas_pos: (7, 4).into(),
+                    kind: BlockKind::Prop,
+                },
+                // MUSHROOM
+                BlockData {
+                    atlas_pos: (8, 4).into(),
+                    kind: BlockKind::Prop,
+                },
+                // STONE
+                BlockData {
+                    atlas_pos: (8, 14).into(),
+                    kind: BlockKind::Prop,
+                },
+                // IRON
+                BlockData {
+                    atlas_pos: (7, 15).into(),
+                    kind: BlockKind::Prop,
+                },
+                // DIAMOND
+                BlockData {
+                    atlas_pos: (8, 15).into(),
+                    kind: BlockKind::Prop,
+                },
+                // RUBY
+                BlockData {
+                    atlas_pos: (7, 16).into(),
+                    kind: BlockKind::Prop,
+                },
+            ],
+        }
+    }
+}
 /// represents the 8 surrounding neighbors
 pub type Neighbors = u8;
 /// represents the 8 surrounding neighbors for the floor and wall
@@ -69,7 +174,7 @@ impl Chunk {
     #[inline(always)]
     pub fn new_empty() -> Self {
         Self {
-            blocks: [0; CHUNK_VOLUME],
+            blocks: [Block::default(); CHUNK_VOLUME],
             neighbors: [(0, 0); CHUNK_VOLUME],
         }
     }
@@ -120,10 +225,10 @@ impl Chunk {
 impl BlockSet {
     /// get the data for any `Block`
     pub fn get_data(&self, gid: Block) -> Option<&BlockData> {
-        if gid == 0 {
+        if gid == Block::default() {
             return None;
         }
-        self.data.get((gid - 1) as usize)
+        self.data.get((Into::<u8>::into(gid) - 1) as usize)
     }
 }
 
@@ -333,7 +438,7 @@ impl BlockMap {
                                 z: wpos.z,
                             };
                             floor_neighbors = (floor_neighbors << 1)
-                                | if world_ref.get_block(npos).unwrap_or(0) == gid {
+                                | if world_ref.get_block(npos).unwrap_or_default() == gid {
                                     1
                                 } else {
                                     0
@@ -354,7 +459,7 @@ impl BlockMap {
                                 z: wpos.z - dz,
                             };
                             wall_neighbors = (wall_neighbors << 1)
-                                | if world_ref.get_block(npos).unwrap_or(0) == gid {
+                                | if world_ref.get_block(npos).unwrap_or_default() == gid {
                                     1
                                 } else {
                                     0
@@ -433,12 +538,14 @@ impl BlockMap {
             y: wpos.y,
             z: wpos.z + 1,
         };
-        let above_gid = self.get_block(above_pos).unwrap_or(0);
+        let above_gid = self.get_block(above_pos).unwrap_or_default();
 
         if let Some(tile_data) = self.blockset.get_data(gid) {
             // get floor neighbors
-            let (floor_mask, _) = self.get_neighbors(wpos).unwrap_or((0, 0));
-            self.draw_tile_floor_cached(draw, atlas, spos, tile_data, floor_mask);
+            if matches!(tile_data.kind, BlockKind::Block(_)) {
+                let (floor_mask, _) = self.get_neighbors(wpos).unwrap_or((0, 0));
+                self.draw_tile_floor_cached(draw, atlas, spos, tile_data, floor_mask);
+            }
         }
 
         if let Some(above_data) = self.blockset.get_data(above_gid) {
