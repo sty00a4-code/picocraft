@@ -48,7 +48,7 @@ impl Game {
         let mwpos = WorldBlockPos {
             x: mx,
             y: my + 1,
-            z: 1,
+            z: 2,
         };
         self.edit_place(mwpos);
         self.edit_move(dt);
