@@ -1,6 +1,6 @@
 # Game Idea
 
-- [ ] tile map with z level
+- [x] tile map with z level
   - [x] engine
   - [x] terrain generation
 - [ ] object-trait engine
