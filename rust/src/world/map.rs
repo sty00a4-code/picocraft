@@ -375,13 +375,14 @@ impl BlockMap {
     #[inline(always)]
     pub fn view_space(cam_world_center: Vector2, cam_zoom: f32) -> (ChunkPos, ChunkPos) {
         let denom = TILE_SIZE as f32 * CHUNK_SIZE as f32;
-        let chunk_start_x = (cam_world_center.x / denom).floor() as i32 - 1;
-        let chunk_start_y = (cam_world_center.y / denom).floor() as i32 - 1;
+        let chunk_start_x = (cam_world_center.x / denom).floor() as i32;
+        let chunk_start_y = (cam_world_center.y / denom).floor() as i32;
 
-        let radius = (3.0 / cam_zoom).clamp(1.0, 8.0) as i32;
+        let width = (3.0 / cam_zoom).clamp(1.0, 3.0) as i32;
+        let height = (3.0 / cam_zoom).clamp(1.0, 2.0) as i32;
 
-        let chunk_end_x = chunk_start_x + radius;
-        let chunk_end_y = chunk_start_y + radius;
+        let chunk_end_x = chunk_start_x + width;
+        let chunk_end_y = chunk_start_y + height;
         (
             ChunkPos {
                 x: chunk_start_x,
