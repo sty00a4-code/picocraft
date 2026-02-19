@@ -1,3 +1,294 @@
+/// src/world/generator.rs
+use super::{
+    map::{Block, Chunk},
+    units::*,
+};
+use noise::{Fbm, NoiseFn, Perlin};
+
+pub trait TerrainGenerator {
+    type ChunkData;
+    fn get_chunk_data(&self, cpos: ChunkPos, perlin: &Fbm<Perlin>) -> Self::ChunkData;
+    fn gen_chunk(&self, cpos: ChunkPos, perlin: &Fbm<Perlin>) -> Chunk {
+        let mut chunk = Chunk::new_empty();
+        let chunk_data = self.get_chunk_data(cpos, perlin);
+        for z in 0..CHUNK_HEIGHT {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let ctpos = ChunkBlockPos { x, y, z };
+                    let wpos = ctpos.to_world(cpos);
+                    chunk.set(ctpos, self.gen_block(wpos, perlin, &chunk_data));
+                }
+            }
+        }
+        chunk
+    }
+    fn gen_block(
+        &self,
+        wpos: WorldBlockPos,
+        perlin: &Fbm<Perlin>,
+        chunk_data: &Self::ChunkData,
+    ) -> Block;
+}
+
+pub trait GetNoise<const DIM: usize> {
+    fn get(&self, pos: [f64; DIM], perlin: &Fbm<Perlin>) -> f64;
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoiseConfig<const DIM: usize> {
+    pub freq: f64,
+    pub amp: f64,
+    pub gain: f64,
+    pub offset: [f64; DIM],
+}
+impl GetNoise<2> for NoiseConfig<2> {
+    #[inline(always)]
+    fn get(&self, pos: [f64; 2], perlin: &Fbm<Perlin>) -> f64 {
+        let p = [0, 1].map(|i| pos[i] + self.offset[i] * self.freq);
+        perlin.get(p) * self.amp * self.gain
+    }
+}
+impl GetNoise<3> for NoiseConfig<3> {
+    #[inline(always)]
+    fn get(&self, pos: [f64; 3], perlin: &Fbm<Perlin>) -> f64 {
+        let p = [0, 1, 2].map(|i| pos[i] + self.offset[i] * self.freq);
+        perlin.get(p) * self.amp * self.gain
+    }
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoiseLayers<const SIZE: usize, const DIM: usize> {
+    pub layers: [NoiseConfig<DIM>; SIZE],
+    pub scales: [f64; SIZE],
+}
+impl<const SIZE: usize> GetNoise<2> for NoiseLayers<SIZE, 2> {
+    fn get(&self, pos: [f64; 2], perlin: &Fbm<Perlin>) -> f64 {
+        self.layers
+            .iter()
+            .zip(self.scales)
+            .map(|(layer, scale)| layer.get(pos, perlin) * scale)
+            .sum::<f64>()
+    }
+}
+impl<const SIZE: usize> GetNoise<3> for NoiseLayers<SIZE, 3> {
+    fn get(&self, pos: [f64; 3], perlin: &Fbm<Perlin>) -> f64 {
+        self.layers
+            .iter()
+            .zip(self.scales)
+            .map(|(layer, scale)| layer.get(pos, perlin) * scale)
+            .sum::<f64>()
+    }
+}
+
+#[derive(Debug)]
+pub struct OverWorldGenerator {
+    pub block_height: NoiseLayers<1, 2>,
+    pub plants: NoiseConfig<2>,
+}
+impl Default for OverWorldGenerator {
+    fn default() -> Self {
+        Self {
+            block_height: NoiseLayers {
+                layers: [NoiseConfig {
+                    freq: 0.01,
+                    amp: 1.,
+                    gain: 1.,
+                    offset: [100., 200.],
+                }],
+                scales: [1.],
+            },
+            plants: NoiseConfig {
+                freq: 1.0,
+                amp: 1.0,
+                gain: 1.,
+                offset: [0., 0.],
+            },
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq)]
+pub enum OverWorldBiom {
+    Plains,
+}
+impl TerrainGenerator for OverWorldGenerator {
+    type ChunkData = OverWorldBiom;
+    fn get_chunk_data(&self, _cpos: ChunkPos, _perlin: &Fbm<Perlin>) -> Self::ChunkData {
+        OverWorldBiom::Plains
+    }
+    fn gen_block(
+        &self,
+        WorldBlockPos { x, y, z }: WorldBlockPos,
+        perlin: &Fbm<Perlin>,
+        chunk_data: &Self::ChunkData,
+    ) -> Block {
+        // generator.rs -> gen_block(...)
+        let height = self
+            .block_height
+            .get([x as f64 * 0.01, y as f64 * 0.01], perlin);
+        let plants = self.plants.get([x as f64, y as f64], perlin);
+
+        match chunk_data {
+            OverWorldBiom::Plains => {
+                if z == 4 {
+                    if height > 0.6 {
+                        return Block::Rock;
+                    }
+                    return Block::default();
+                }
+                if z == 3 {
+                    if height > 0.4 {
+                        return Block::Rock;
+                    } else if height > 0.2 {
+                        if plants > 0.2 {
+                            return Block::Tree;
+                        } else if plants > 0.15 {
+                            return Block::BerryBush;
+                        } else if plants > 0.1 {
+                            return Block::Bush;
+                        }
+                    }
+                    return Block::default();
+                }
+                if z == 2 {
+                    if height > 0.2 {
+                        return Block::Grass;
+                    } else if height > 0.05 {
+                        if plants > 0.2 {
+                            return Block::Tree;
+                        } else if plants > 0.15 {
+                            return Block::BerryBush;
+                        } else if plants > 0.1 {
+                            return Block::Bush;
+                        }
+                    }
+                    return Block::default();
+                }
+                // surface layer handling
+                if z == 1 {
+                    if height > 0.05 {
+                        return Block::Grass;
+                    } else if height > 0.0 {
+                        return Block::Sand;
+                    } else {
+                        return Block::default();
+                    }
+                }
+
+                // lower layers
+                if z < 1 {
+                    if height > 0.05 {
+                        return Block::Grass;
+                    }
+                    if height > 0.0 {
+                        return Block::Sand;
+                    }
+                }
+
+                Block::default()
+            }
+        }
+    }
+}
+/// END src/world/generator.rs
+
+/// src/world/mod.rs
+pub mod generator;
+pub mod map;
+pub mod units;
+/// END src/world/mod.rs
+
+/// src/world/units.rs
+use raylib::prelude::*;
+
+/// static tile size
+pub const TILE_SIZE: usize = 32;
+/// static chunk size
+pub const CHUNK_SIZE: usize = 16;
+/// static chunk size
+pub const CHUNK_HEIGHT: usize = 8;
+/// static chunk volume for flat lists
+pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT;
+
+/// represents a tile position in the atlas based on `TILE_SIZE`
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AtlasPos {
+    pub x: u8,
+    pub y: u8,
+}
+impl AtlasPos {
+    /// turns into a source rectangle for the atlas image
+    #[inline(always)]
+    pub fn source(self) -> Rectangle {
+        Rectangle {
+            x: self.x as f32 * TILE_SIZE as f32,
+            y: self.y as f32 * TILE_SIZE as f32,
+            width: TILE_SIZE as f32,
+            height: TILE_SIZE as f32,
+        }
+    }
+}
+impl From<(u8, u8)> for AtlasPos {
+    #[inline(always)]
+    fn from((x, y): (u8, u8)) -> Self {
+        Self { x, y }
+    }
+}
+/// represents a block position in a chunk
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChunkBlockPos {
+    pub x: usize,
+    pub y: usize,
+    pub z: usize,
+}
+impl ChunkBlockPos {
+    /// returns the flat index of the position
+    #[inline(always)]
+    pub fn idx(self) -> usize {
+        self.z * (CHUNK_SIZE * CHUNK_SIZE) + self.y * CHUNK_SIZE + self.x
+    }
+    /// converts it to world position based on the chunk position `cpos`
+    #[inline(always)]
+    pub fn to_world(self, cpos: ChunkPos) -> WorldBlockPos {
+        WorldBlockPos {
+            x: cpos.x * CHUNK_SIZE as i32 + self.x as i32,
+            y: cpos.y * CHUNK_SIZE as i32 + self.y as i32,
+            z: self.z as i32,
+        }
+    }
+}
+/// represents the position of a chunk
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChunkPos {
+    pub x: i32,
+    pub y: i32,
+}
+/// represents the position of a tile in the world
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WorldBlockPos {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+impl From<WorldBlockPos> for ChunkBlockPos {
+    #[inline(always)]
+    fn from(w: WorldBlockPos) -> Self {
+        ChunkBlockPos {
+            x: w.x.rem_euclid(CHUNK_SIZE as i32) as usize,
+            y: w.y.rem_euclid(CHUNK_SIZE as i32) as usize,
+            z: w.z.rem_euclid(CHUNK_SIZE as i32) as usize,
+        }
+    }
+}
+impl From<WorldBlockPos> for ChunkPos {
+    #[inline(always)]
+    fn from(w: WorldBlockPos) -> Self {
+        ChunkPos {
+            x: w.x.div_euclid(CHUNK_SIZE as i32),
+            y: w.y.div_euclid(CHUNK_SIZE as i32),
+        }
+    }
+}
+/// END src/world/units.rs
+
+/// src/world/map.rs
 use crate::world::generator::{OverWorldGenerator, TerrainGenerator};
 
 use super::units::*;
@@ -862,3 +1153,132 @@ pub fn at47(neighbors: Neighbors) -> AtlasPos {
         _ => (6, 2),
     })
 }
+/// END src/world/map.rs
+
+
+/// src/main.rs
+#![allow(dead_code)]
+pub mod entities;
+pub mod world;
+
+use entities::player::Player;
+use raylib::prelude::*;
+use world::{
+    map::{BlockMap, BlockSet},
+    units::{TILE_SIZE, WorldBlockPos},
+};
+
+use crate::world::{generator::OverWorldGenerator, map::Block};
+
+pub struct Game {
+    rl: RaylibHandle,
+    thread: RaylibThread,
+    atlas: Texture2D,
+    world: BlockMap,
+    camera: Camera2D,
+    selected: u8,
+    player: Player,
+}
+impl Default for Game {
+    fn default() -> Self {
+        let (mut rl, thread) = raylib::init().size(640, 480).title("PicoCraft").build();
+        let atlas = rl.load_texture(&thread, "assets/tileset.png").unwrap();
+        Self {
+            rl,
+            thread,
+            atlas,
+            world: BlockMap::new(BlockSet::normal(), OverWorldGenerator::default(), 42),
+            camera: Camera2D {
+                zoom: 0.5,
+                ..Default::default()
+            },
+            selected: 1,
+            player: Player::default(),
+        }
+    }
+}
+impl Game {
+    pub fn edit(&mut self, dt: f32) {
+        let m = self.rl.get_mouse_position() / (TILE_SIZE as f32 * self.camera.zoom);
+        let (mx, my) = (
+            self.camera.target.x as i32 / TILE_SIZE as i32 + m.x as i32,
+            self.camera.target.y as i32 / TILE_SIZE as i32 + m.y as i32,
+        );
+        let mwpos = WorldBlockPos {
+            x: mx,
+            y: my + 1,
+            z: 2,
+        };
+        self.edit_place(mwpos);
+        self.edit_move(dt);
+    }
+    pub fn edit_place(&mut self, mwpos: WorldBlockPos) {
+        let md = self.rl.get_mouse_wheel_move();
+        if md > 0.0 {
+            self.selected = self.selected.wrapping_add(1).max(1);
+        } else if md < 0.0 {
+            self.selected = self.selected.wrapping_sub(1).max(1);
+        }
+        if self.rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
+            self.world
+                .set_block(mwpos, self.selected.try_into().unwrap_or_default());
+        } else if self
+            .rl
+            .is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT)
+        {
+            self.world.set_block(mwpos, Block::default());
+        }
+    }
+    pub fn edit_move(&mut self, dt: f32) {
+        const SPEED: f32 = 300.0;
+        let mut acc = Vector2::zero();
+        if self.rl.is_key_down(KeyboardKey::KEY_A) {
+            acc.x -= 1.0;
+        }
+        if self.rl.is_key_down(KeyboardKey::KEY_D) {
+            acc.x += 1.0;
+        }
+        if self.rl.is_key_down(KeyboardKey::KEY_W) {
+            acc.y -= 1.0;
+        }
+        if self.rl.is_key_down(KeyboardKey::KEY_S) {
+            acc.y += 1.0;
+        }
+        self.camera.target += acc.normalized() * SPEED / self.camera.zoom * dt;
+    }
+    pub fn update(&mut self, dt: f32) {
+        self.edit(dt);
+        self.world.update(dt, &self.camera);
+    }
+    pub fn draw(&mut self) {
+        let fps = self.rl.get_fps();
+        let mut d = self.rl.begin_drawing(&self.thread);
+        d.clear_background(Color::SKYBLUE);
+        self.world.draw(&mut d, &self.atlas, &self.camera);
+        // self.player.draw();
+        d.draw_text(&fps.to_string(), 5, 5, 32, Color::RED);
+    }
+    pub fn run(&mut self) {
+        while !self.rl.window_should_close() {
+            self.update(self.rl.get_frame_time());
+            self.draw();
+        }
+    }
+}
+
+fn main() {
+    let mut game = Game::default();
+    game.run();
+}
+/// END src/main.rs
+
+/// src/entities/mod.rs
+pub mod player;
+/// END src/entities/mod.rs
+
+/// src/entities/player.rs
+#[derive(Debug, Default)]
+pub struct Player {}
+/// END src/entities/player.rs
+
+

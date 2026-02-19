@@ -1,8 +1,8 @@
 #![allow(dead_code)]
-pub mod player;
+pub mod entities;
 pub mod world;
 
-use player::Player;
+use entities::player::Player;
 use raylib::prelude::*;
 use world::{
     map::{BlockMap, BlockSet},
@@ -15,10 +15,10 @@ pub struct Game {
     rl: RaylibHandle,
     thread: RaylibThread,
     atlas: Texture2D,
-    player: Player,
     world: BlockMap,
     camera: Camera2D,
     selected: u8,
+    player: Player,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -28,13 +28,13 @@ impl Default for Game {
             rl,
             thread,
             atlas,
-            player: Player::default(),
             world: BlockMap::new(BlockSet::normal(), OverWorldGenerator::default(), 42),
             camera: Camera2D {
                 zoom: 0.5,
                 ..Default::default()
             },
             selected: 1,
+            player: Player::default(),
         }
     }
 }
@@ -89,7 +89,6 @@ impl Game {
     }
     pub fn update(&mut self, dt: f32) {
         self.edit(dt);
-        // self.player.update(dt);
         self.world.update(dt, &self.camera);
     }
     pub fn draw(&mut self) {
