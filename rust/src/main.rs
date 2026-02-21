@@ -1,74 +1,74 @@
 #![allow(dead_code)]
-pub mod entities;
+extern crate crossbeam_channel;
+extern crate hecs;
+extern crate noise;
+extern crate rand;
+extern crate raylib;
+extern crate rayon;
+extern crate rustc_hash;
+
+pub mod components;
 pub mod world;
 
-use entities::player::Player;
+use std::collections::VecDeque;
+
+use crate::world::{generator::OverWorldGenerator, map};
+use hecs::World;
 use raylib::prelude::*;
-use world::{
-    map::{BlockMap, BlockSet},
-    units::{TILE_SIZE, WorldBlockPos},
-};
+use world::map::{BlockMap, BlockSet};
 
-use crate::world::{generator::OverWorldGenerator, map::Block};
+pub const SCREEN_WIDTH: i32 = (1920.0 / 1.5) as i32;
+pub const SCREEN_HEIGHT: i32 = (1080.0 / 1.5) as i32;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum GameEvents {
+    BodyEvent(components::BodyEvents),
+}
+pub struct GameData {
+    events: VecDeque<GameEvents>,
+    camera: Camera2D,
+    atlas: Texture2D,
+    selected: u8,
+}
 pub struct Game {
     rl: RaylibHandle,
     thread: RaylibThread,
-    atlas: Texture2D,
-    world: BlockMap,
-    camera: Camera2D,
-    selected: u8,
-    player: Player,
+    world: World,
+    data: GameData,
 }
 impl Default for Game {
     fn default() -> Self {
-        let (mut rl, thread) = raylib::init().size(640, 480).title("PicoCraft").build();
+        let (mut rl, thread) = raylib::init()
+            .size(SCREEN_WIDTH, SCREEN_HEIGHT)
+            .title("PicoCraft")
+            .build();
         let atlas = rl.load_texture(&thread, "assets/tileset.png").unwrap();
+        let mut world = World::new();
+        world.spawn((BlockMap::new(
+            BlockSet::normal(),
+            OverWorldGenerator::default(),
+            42,
+        ),));
+        components::player::spawn_player(&mut world);
         Self {
             rl,
             thread,
-            atlas,
-            world: BlockMap::new(BlockSet::normal(), OverWorldGenerator::default(), 42),
-            camera: Camera2D {
-                zoom: 0.5,
-                ..Default::default()
+            world,
+            data: GameData {
+                events: VecDeque::default(),
+                camera: Camera2D {
+                    zoom: 2.0,
+                    ..Default::default()
+                },
+                atlas,
+                selected: 1,
             },
-            selected: 1,
-            player: Player::default(),
         }
     }
 }
 impl Game {
     pub fn edit(&mut self, dt: f32) {
-        let m = self.rl.get_mouse_position() / (TILE_SIZE as f32 * self.camera.zoom);
-        let (mx, my) = (
-            self.camera.target.x as i32 / TILE_SIZE as i32 + m.x as i32,
-            self.camera.target.y as i32 / TILE_SIZE as i32 + m.y as i32,
-        );
-        let mwpos = WorldBlockPos {
-            x: mx,
-            y: my + 1,
-            z: 2,
-        };
-        self.edit_place(mwpos);
         self.edit_move(dt);
-    }
-    pub fn edit_place(&mut self, mwpos: WorldBlockPos) {
-        let md = self.rl.get_mouse_wheel_move();
-        if md > 0.0 {
-            self.selected = self.selected.wrapping_add(1).max(1);
-        } else if md < 0.0 {
-            self.selected = self.selected.wrapping_sub(1).max(1);
-        }
-        if self.rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
-            self.world
-                .set_block(mwpos, self.selected.try_into().unwrap_or_default());
-        } else if self
-            .rl
-            .is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT)
-        {
-            self.world.set_block(mwpos, Block::default());
-        }
     }
     pub fn edit_move(&mut self, dt: f32) {
         const SPEED: f32 = 300.0;
@@ -85,18 +85,22 @@ impl Game {
         if self.rl.is_key_down(KeyboardKey::KEY_S) {
             acc.y += 1.0;
         }
-        self.camera.target += acc.normalized() * SPEED / self.camera.zoom * dt;
+        self.data.camera.target += acc.normalized() * SPEED / self.data.camera.zoom * dt;
     }
     pub fn update(&mut self, dt: f32) {
         self.edit(dt);
-        self.world.update(dt, &self.camera);
+        map::update_map(&mut self.world, &mut self.data, dt);
+        components::update_all(&mut self.rl, &mut self.world, &mut self.data, dt);
     }
     pub fn draw(&mut self) {
         let fps = self.rl.get_fps();
         let mut d = self.rl.begin_drawing(&self.thread);
         d.clear_background(Color::SKYBLUE);
-        self.world.draw(&mut d, &self.atlas, &self.camera);
-        // self.player.draw();
+        {
+            let mut draw: RaylibMode2D<'_, RaylibDrawHandle<'_>> = d.begin_mode2D(self.data.camera);
+            map::draw_map(&mut self.world, &mut draw, &self.data);
+            components::draw_all(&mut self.world, &mut draw, &self.data);
+        }
         d.draw_text(&fps.to_string(), 5, 5, 32, Color::RED);
     }
     pub fn run(&mut self) {

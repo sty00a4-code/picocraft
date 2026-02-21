@@ -1,7 +1,11 @@
-use crate::world::generator::{OverWorldGenerator, TerrainGenerator};
+use crate::{
+    GameData,
+    world::generator::{OverWorldGenerator, TerrainGenerator},
+};
 
 use super::units::*;
 use crossbeam_channel::{Receiver, Sender, bounded};
+use hecs::World;
 use noise::{Fbm, Perlin};
 use raylib::prelude::*;
 use rayon::prelude::*;
@@ -200,8 +204,6 @@ impl Chunk {
         }
     }
 
-    // ... (keep all existing Chunk methods unchanged)
-
     /// returns `Block` at `ChunkBlockPos`
     #[inline(always)]
     pub fn get(&self, pos: ChunkBlockPos) -> Option<Block> {
@@ -378,8 +380,8 @@ impl BlockMap {
         let chunk_start_x = (cam_world_center.x / denom).floor() as i32;
         let chunk_start_y = (cam_world_center.y / denom).floor() as i32;
 
-        let width = (3.0 / cam_zoom).clamp(1.0, 3.0) as i32;
-        let height = (3.0 / cam_zoom).clamp(1.0, 2.0) as i32;
+        let width = (4.0 / cam_zoom).clamp(1.0, 4.0) as i32;
+        let height = (3.0 / cam_zoom).clamp(1.0, 3.0) as i32;
 
         let chunk_end_x = chunk_start_x + width;
         let chunk_end_y = chunk_start_y + height;
@@ -396,9 +398,9 @@ impl BlockMap {
     }
 
     /// updates every chunk and generates new ones within `view_space`
-    pub fn update(&mut self, _dt: f32, camera: &Camera2D) {
+    pub fn update(&mut self, _dt: f32, data: &GameData) {
         // get view space for updating chunks
-        let (start, end) = Self::view_space(camera.target, camera.zoom);
+        let (start, end) = Self::view_space(data.camera.target, data.camera.zoom);
         // receive new chunks from channel
         while let Ok(response) = self.response_rx.try_recv() {
             self.set_chunk(response.pos, response.chunk);
@@ -502,15 +504,13 @@ impl BlockMap {
     }
 
     /// draw the world to the screen in `view_space`
-    pub fn draw(&self, d: &mut RaylibDrawHandle, atlas: &Texture2D, camera: &Camera2D) {
-        let mut draw: RaylibMode2D<'_, RaylibDrawHandle<'_>> = d.begin_mode2D(*camera);
-
-        let (start, end) = Self::view_space(camera.target, camera.zoom);
+    pub fn draw(&self, d: &mut RaylibMode2D<'_, RaylibDrawHandle<'_>>, data: &GameData) {
+        let (start, end) = Self::view_space(data.camera.target, data.camera.zoom);
 
         // all chunks in view
         for y in start.y..=end.y {
             for x in start.x..=end.x {
-                self.draw_chunk(&mut draw, atlas, ChunkPos { x, y });
+                self.draw_chunk(d, &data.atlas, ChunkPos { x, y });
             }
         }
     }
@@ -625,6 +625,20 @@ impl BlockMap {
             BlockKind::Prop => atlas_pos.source(),
         };
         draw.draw_texture_pro(atlas, src, dst, Vector2::zero(), 0.0, Color::WHITE);
+    }
+}
+pub fn update_map(world: &mut World, data: &mut GameData, dt: f32) {
+    for block_map in world.query_mut::<&mut BlockMap>() {
+        block_map.update(dt, data);
+    }
+}
+pub fn draw_map(
+    world: &mut World,
+    d: &mut RaylibMode2D<'_, RaylibDrawHandle<'_>>,
+    data: &GameData,
+) {
+    for block_map in world.query_mut::<&mut BlockMap>() {
+        block_map.draw(d, data);
     }
 }
 

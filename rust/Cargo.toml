@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 crossbeam-channel = "0.5.15"
+hecs = "0.11.0"
 noise = "0.9.0"
 rand = "0.10.0"
 raylib = "5.5.1"
