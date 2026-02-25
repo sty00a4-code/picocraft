@@ -1,28 +1,63 @@
 pub mod player;
 
-use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
-
-use hecs::{Entity, World};
-
 use crate::{
-    GameData, GameEvents,
+    GameData, GameEvent,
     raylib::prelude::*,
-    world::units::{AtlasPos, TILE_SIZE},
+    world::{
+        map::BlockMapDrawBuffer,
+        units::{AtlasPos, TILE_SIZE, WorldBlockPos},
+    },
 };
+use hecs::{Entity, World};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum BodyEvents {
-    Overlap { src: Entity, dst: Entity },
-}
-impl From<BodyEvents> for GameEvents {
-    fn from(val: BodyEvents) -> Self {
-        GameEvents::BodyEvent(val)
-    }
-}
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body {
     pub pos: Vector3,
     pub size: Vector3,
+}
+#[derive(Debug, Clone, PartialEq)]
+/// Events for Bodies
+pub enum BodyEvent {
+    Overlap { a: Entity, b: Entity },
+}
+impl From<BodyEvent> for GameEvent {
+    fn from(val: BodyEvent) -> Self {
+        GameEvent::BodyEvent(val)
+    }
+}
+impl BodyEvent {
+    pub fn update(&self, world: &mut World, _dt: f32) {
+        match self {
+            BodyEvent::Overlap { a, b } => {
+                // we already know they are overlapping
+                let Ok(mut a) = world.get::<&mut Body>(*a) else {
+                    return;
+                };
+                let Ok(b) = world.get::<&Body>(*b) else {
+                    return;
+                };
+                // horizontal resolve
+                if a.pos.x < b.pos.x {
+                    a.pos.x = b.pos.x - a.size.x;
+                } else if a.pos.x > b.pos.x {
+                    a.pos.x = b.pos.x + b.size.x;
+                }
+                // vertical resolve
+                if a.pos.y < b.pos.y {
+                    a.pos.y = b.pos.y - a.size.y;
+                } else if a.pos.y > b.pos.y {
+                    a.pos.y = b.pos.y + b.size.y;
+                }
+                // height resolve
+                if a.pos.z < b.pos.z {
+                    a.pos.z = b.pos.z - a.size.z;
+                } else if a.pos.z > b.pos.z {
+                    a.pos.z = b.pos.z + b.size.z;
+                }
+            }
+        }
+    }
 }
 impl Body {
     #[inline(always)]
@@ -37,25 +72,25 @@ impl Body {
     #[inline(always)]
     pub fn update_overlap(world: &mut World, data: &mut GameData) {
         let mut snap: Vec<(Entity, Body)> = Vec::new();
+        // collect all the bodies
         for (ent, body) in world.query::<(Entity, &Body)>().iter() {
             snap.push((ent, body.clone()));
         }
-        if snap.is_empty() {
+        if snap.len() <= 1 {
+            // nothing that can overlap
             return;
         }
+        // find overlaps
         for (ent_a, body_a) in snap.iter() {
             for (ent_b, body_b) in snap.iter() {
                 if *ent_a == *ent_b {
                     continue;
                 }
                 if body_a.overlap(body_b) {
-                    data.events.push_back(
-                        BodyEvents::Overlap {
-                            src: *ent_a,
-                            dst: *ent_b,
-                        }
-                        .into(),
-                    );
+                    data.push_event(BodyEvent::Overlap {
+                        a: *ent_a,
+                        b: *ent_b,
+                    });
                 }
             }
         }
@@ -73,52 +108,16 @@ impl Physics {
         for (body, physics) in world.query_mut::<(&mut Body, &mut Physics)>() {
             physics.vel.z -= GRAVITY * dt;
             body.pos += physics.vel;
-            if body.pos.z < 0.0 {
-                body.pos.z = 0.0;
+            // naiv collision for now
+            if body.pos.z < 2.0 {
+                body.pos.z = 2.0;
                 physics.vel.z = 0.0;
-            }
-        }
-    }
-    #[inline(always)]
-    pub fn update_collision(world: &mut World) {
-        let mut snap: Vec<(Entity, Body)> = Vec::new();
-        for (ent, body, _) in world.query::<(Entity, &Body, &Physics)>().iter() {
-            snap.push((ent, body.clone()));
-        }
-        if snap.is_empty() {
-            return;
-        }
-        let mut accum: HashMap<Entity, Vector3> = HashMap::new();
-        for (i, (ent_a, body_a)) in snap.iter().enumerate() {
-            let mut acc = Vector3::zero();
-            let mut len: usize = 0;
-            for (j, (_, body_b)) in snap.iter().enumerate() {
-                if i == j {
-                    continue;
-                }
-                if !body_a.overlap(body_b) {
-                    continue;
-                }
-
-                acc += body_a.pos - body_b.pos;
-                len += 1;
-            }
-            if len > 0 {
-                let dv = acc / (len as f32);
-                accum.entry(*ent_a).and_modify(|v| *v += dv).or_insert(dv);
-            }
-        }
-
-        for (ent, _, phys) in world.query_mut::<(Entity, &Body, &mut Physics)>() {
-            if let Some(dv) = accum.get(&ent).copied() {
-                phys.vel += dv;
             }
         }
     }
     #[inline(always)]
     pub fn update(world: &mut World, dt: f32) {
         Self::update_gravity(world, dt);
-        Self::update_collision(world);
     }
 }
 
@@ -137,16 +136,19 @@ impl AtlasSprite {
         }
     }
     #[inline(always)]
-    pub fn draw_with_body(world: &mut World, d: &mut RaylibDrawHandle, data: &GameData) {
+    pub fn draw_with_body(world: &mut World, d: &mut BlockMapDrawBuffer, _data: &GameData) {
         for (body, atlas_sprite) in world.query::<(&Body, &Self)>().iter() {
             let src = atlas_sprite.source();
-            let dst = Rectangle {
-                x: body.pos.x * TILE_SIZE as f32,
-                y: (body.pos.y - body.pos.z) * TILE_SIZE as f32,
-                width: TILE_SIZE as f32,
-                height: TILE_SIZE as f32,
-            };
-            d.draw_texture_pro(&data.atlas, src, dst, Vector2::zero(), 0.0, Color::WHITE);
+            d.register(
+                WorldBlockPos {
+                    x: body.pos.x as i32,
+                    y: body.pos.y as i32,
+                    z: body.pos.z as i32,
+                },
+                body.pos,
+                src,
+            );
+            // d.draw_texture_pro(&data.atlas, src, dst, Vector2::zero(), 0.0, Color::WHITE);
         }
     }
 }
@@ -193,17 +195,19 @@ impl AtlasSpriteAnimation {
         }
     }
     #[inline(always)]
-    pub fn draw_with_body(world: &mut World, d: &mut RaylibDrawHandle, data: &GameData) {
+    pub fn draw_with_body(world: &mut World, d: &mut BlockMapDrawBuffer, _data: &GameData) {
         for (body, atlas_sprite_animation) in world.query::<(&Body, &AtlasSpriteAnimation)>().iter()
         {
             let src = atlas_sprite_animation.source();
-            let dst = Rectangle {
-                x: body.pos.x * TILE_SIZE as f32,
-                y: (body.pos.y - body.pos.z) * TILE_SIZE as f32,
-                width: TILE_SIZE as f32,
-                height: TILE_SIZE as f32,
-            };
-            d.draw_texture_pro(&data.atlas, src, dst, Vector2::zero(), 0.0, Color::WHITE);
+            d.register(
+                WorldBlockPos {
+                    x: body.pos.x as i32,
+                    y: body.pos.y as i32,
+                    z: body.pos.z as i32,
+                },
+                body.pos,
+                src,
+            );
         }
     }
 }
@@ -258,7 +262,7 @@ pub fn update_all(rl: &mut RaylibHandle, world: &mut World, data: &mut GameData,
     player::Player::update(world, data);
 }
 #[inline(always)]
-pub fn draw_all(world: &mut World, d: &mut RaylibDrawHandle, data: &GameData) {
+pub fn draw_all(world: &mut World, d: &mut BlockMapDrawBuffer, data: &GameData) {
     AtlasSprite::draw_with_body(world, d, data);
     AtlasSpriteAnimation::draw_with_body(world, d, data);
 }

@@ -11,6 +11,7 @@ use raylib::prelude::*;
 use rayon::prelude::*;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::{
+    collections::HashMap,
     fmt::Debug,
     sync::Arc,
     thread::{self, JoinHandle},
@@ -54,6 +55,10 @@ pub struct BlockMap {
     pub request_tx: Sender<ChunkRequest>,
     pub response_rx: Receiver<ChunkResponse>,
     pub last_view: (ChunkPos, ChunkPos),
+}
+#[derive(Debug, Default)]
+pub struct BlockMapDrawBuffer {
+    pub sprites: HashMap<WorldBlockPos, Vec<(Vector3, Rectangle)>>,
 }
 
 /// holds blocks and their cashed `BlockNeighbors`
@@ -252,6 +257,16 @@ impl BlockSet {
             return None;
         }
         self.data.get((Into::<u8>::into(gid) - 1) as usize)
+    }
+}
+
+impl BlockMapDrawBuffer {
+    pub fn register(&mut self, wpos: WorldBlockPos, pos: Vector3, rect: Rectangle) {
+        if let Some(list) = self.sprites.get_mut(&wpos) {
+            list.push((pos, rect));
+        } else {
+            self.sprites.insert(wpos, vec![(pos, rect)]);
+        }
     }
 }
 
@@ -504,13 +519,18 @@ impl BlockMap {
     }
 
     /// draw the world to the screen in `view_space`
-    pub fn draw(&self, d: &mut RaylibMode2D<'_, RaylibDrawHandle<'_>>, data: &GameData) {
+    pub fn draw(
+        &self,
+        d: &mut RaylibMode2D<'_, RaylibDrawHandle<'_>>,
+        buffer: &mut BlockMapDrawBuffer,
+        data: &GameData,
+    ) {
         let (start, end) = Self::view_space(data.camera.target, data.camera.zoom);
 
         // all chunks in view
         for y in start.y..=end.y {
             for x in start.x..=end.x {
-                self.draw_chunk(d, &data.atlas, ChunkPos { x, y });
+                self.draw_chunk(d, buffer, &data.atlas, ChunkPos { x, y });
             }
         }
     }
@@ -519,6 +539,7 @@ impl BlockMap {
     pub fn draw_chunk(
         &self,
         draw: &mut RaylibMode2D<'_, RaylibDrawHandle<'_>>,
+        buffer: &mut BlockMapDrawBuffer,
         atlas: &Texture2D,
         cpos: ChunkPos,
     ) {
@@ -531,6 +552,24 @@ impl BlockMap {
                         let ctpos = ChunkBlockPos { x, y, z };
                         if let Some(gid) = chunk.get(ctpos) {
                             let wpos = ctpos.to_world(cpos);
+                            if let Some(rects) = buffer.sprites.get(&wpos) {
+                                for (pos, rect) in rects {
+                                    let dst = Rectangle {
+                                        x: pos.x * TILE_SIZE as f32,
+                                        y: (pos.y - pos.z) * TILE_SIZE as f32,
+                                        width: TILE_SIZE as f32,
+                                        height: TILE_SIZE as f32,
+                                    };
+                                    draw.draw_texture_pro(
+                                        atlas,
+                                        rect,
+                                        dst,
+                                        Vector2::zero(),
+                                        0.0,
+                                        Color::WHITE,
+                                    );
+                                }
+                            }
                             self.draw_tile(&mut *draw, atlas, wpos, gid);
                         }
                     }
@@ -635,10 +674,11 @@ pub fn update_map(world: &mut World, data: &mut GameData, dt: f32) {
 pub fn draw_map(
     world: &mut World,
     d: &mut RaylibMode2D<'_, RaylibDrawHandle<'_>>,
+    buffer: &mut BlockMapDrawBuffer,
     data: &GameData,
 ) {
     for block_map in world.query_mut::<&mut BlockMap>() {
-        block_map.draw(d, data);
+        block_map.draw(d, buffer, data);
     }
 }
 

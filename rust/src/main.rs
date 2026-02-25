@@ -12,7 +12,10 @@ pub mod world;
 
 use std::collections::VecDeque;
 
-use crate::world::{generator::OverWorldGenerator, map};
+use crate::world::{
+    generator::OverWorldGenerator,
+    map::{self, BlockMapDrawBuffer},
+};
 use hecs::World;
 use raylib::prelude::*;
 use world::map::{BlockMap, BlockSet};
@@ -21,11 +24,11 @@ pub const SCREEN_WIDTH: i32 = (1920.0 / 1.5) as i32;
 pub const SCREEN_HEIGHT: i32 = (1080.0 / 1.5) as i32;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum GameEvents {
-    BodyEvent(components::BodyEvents),
+pub enum GameEvent {
+    BodyEvent(components::BodyEvent),
 }
 pub struct GameData {
-    events: VecDeque<GameEvents>,
+    events: VecDeque<GameEvent>,
     camera: Camera2D,
     atlas: Texture2D,
     selected: u8,
@@ -87,19 +90,31 @@ impl Game {
         }
         self.data.camera.target += acc.normalized() * SPEED / self.data.camera.zoom * dt;
     }
+    #[inline(always)]
     pub fn update(&mut self, dt: f32) {
         self.edit(dt);
         map::update_map(&mut self.world, &mut self.data, dt);
         components::update_all(&mut self.rl, &mut self.world, &mut self.data, dt);
+        self.event(dt);
     }
+    #[inline(always)]
+    pub fn event(&mut self, dt: f32) {
+        for event in self.data.events.iter() {
+            match event {
+                GameEvent::BodyEvent(body_event) => body_event.update(&mut self.world, dt),
+            }
+        }
+    }
+    #[inline(always)]
     pub fn draw(&mut self) {
         let fps = self.rl.get_fps();
         let mut d = self.rl.begin_drawing(&self.thread);
         d.clear_background(Color::SKYBLUE);
         {
             let mut draw: RaylibMode2D<'_, RaylibDrawHandle<'_>> = d.begin_mode2D(self.data.camera);
-            map::draw_map(&mut self.world, &mut draw, &self.data);
-            components::draw_all(&mut self.world, &mut draw, &self.data);
+            let mut buffer = BlockMapDrawBuffer::default();
+            components::draw_all(&mut self.world, &mut buffer, &self.data);
+            map::draw_map(&mut self.world, &mut draw, &mut buffer, &self.data);
         }
         d.draw_text(&fps.to_string(), 5, 5, 32, Color::RED);
     }
@@ -108,6 +123,11 @@ impl Game {
             self.update(self.rl.get_frame_time());
             self.draw();
         }
+    }
+}
+impl GameData {
+    pub fn push_event(&mut self, event: impl Into<GameEvent>) {
+        self.events.push_back(event.into());
     }
 }
 
